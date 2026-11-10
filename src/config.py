@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     database_url: str
     test_database_url: str | None = None
     cors_origins: list[str] = []
+    rate_limit_storage_uri: str = "memory://"
+    rate_limit_auth: str = "10/minute"
 
     @property
     def docs_enabled(self) -> bool:

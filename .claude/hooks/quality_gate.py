@@ -19,7 +19,12 @@ def main() -> int:
     failures: list[str] = []
     for name, args in CHECKS:
         result = subprocess.run(  # noqa: S603
-            [sys.executable, "-m", *args], capture_output=True, text=True, check=False
+            [sys.executable, "-m", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
         )
         if result.returncode != 0:
             failures.append(f"### {name}\n{result.stdout[-4000:]}{result.stderr[-2000:]}")

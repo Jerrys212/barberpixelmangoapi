@@ -18,6 +18,19 @@ uv run fastapi dev src/main.py
 
 - Health check: `GET http://localhost:8000/health`
 - Docs: `http://localhost:8000/docs` (desactivadas con `ENVIRONMENT=production`)
+- API: todas las rutas bajo `/api/v1` (`/auth/*`, `/users/me`).
+- Con `EMAIL_BACKEND=console` los correos (y sus códigos OTP) se imprimen en la consola del
+  servidor; con `EMAIL_BACKEND=smtp` se envían por SMTP con las variables `SMTP_*`.
+
+## Cuenta del dueño
+
+La cuenta `OWNER` solo se crea y recupera desde consola (la contraseña se pide de forma
+interactiva):
+
+```bash
+uv run python -m src.auth.cli create-owner --email dueno@example.com --name "Nombre" --phone +525512345678
+uv run python -m src.auth.cli reset-owner-password
+```
 
 ## Calidad
 

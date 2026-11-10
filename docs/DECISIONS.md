@@ -15,12 +15,12 @@ contradicen, manda este archivo. Toda decisión nueva se agrega aquí con su fec
 | Reprogramar                | No en V1.                                                                              |
 | Citas creadas por el dueño | No en V1.                                                                              |
 | Notificaciones             | Solo correo. Fase 1: verificación y recuperación. Confirmación, cancelación y reembolso en sus fases. |
-| Proveedor de correo        | Brevo, por su API transaccional.                                                       |
+| Proveedor de correo        | Brevo, por SMTP (relay de Brevo) con STARTTLS en el puerto 587.                        |
 | Proveedor de pagos         | Stripe o Mercado Pago. Se puede decidir hasta la fase 4; antes no hace falta.          |
 | Moneda e importes          | Solo MXN en V1, pero se guarda la columna de moneda. Importes en centavos como entero. |
 | Imagen del servicio        | URL externa. Sin subida de archivos.                                                   |
 | Correo no verificado       | Puede iniciar sesión, pero no reservar ni pagar (403 con error de dominio identificable). |
-| Teléfono                   | Obligatorio al registrarse.                                                            |
+| Teléfono                   | Obligatorio al registrarse, en formato E.164 (`+525512345678`), validado con regex.    |
 
 ### Configuración del negocio
 
@@ -38,8 +38,15 @@ duración de la retención, ventana de cancelación y anticipación mínima/máx
 | Anticipación mínima           | 1 h                   |
 | Horizonte máximo              | 30 días               |
 
-Cada cita guarda en su snapshot lo que le aplica: nombre, precio y moneda del servicio, duración y
-buffer. El resto (ventana de cancelación, anticipación) se lee del perfil vigente.
+Qué se congela en la cita y qué se lee del perfil vigente:
+
+| Parámetro                         | Dónde se lee                  | Por qué                                                              |
+| --------------------------------- | ----------------------------- | -------------------------------------------------------------------- |
+| Nombre, precio y moneda del servicio | Snapshot de la cita        | Es lo que el cliente compró.                                         |
+| Duración y buffer                 | Snapshot de la cita           | Definen cuánto ocupa la cita en la agenda.                           |
+| Ventana de cancelación            | Snapshot de la cita           | El cliente pagó bajo la política vigente al reservar; si el dueño la cambia (p. ej. de 24 h a 48 h), no afecta citas ya creadas. |
+| Anticipación mínima y máxima      | Perfil vigente                | Solo aplica en el momento de reservar.                               |
+| Intervalo de slots y retención    | Perfil vigente                | Solo aplican al calcular disponibilidad y al crear la retención.     |
 
 ## Técnicas (10 de noviembre de 2026)
 
@@ -47,11 +54,12 @@ buffer. El resto (ventana de cancelación, anticipación) se lee del perfil vige
 | ---------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Tareas programadas     | APScheduler dentro del proceso, sin Redis. Un solo proceso ejecuta el scheduler (`SCHEDULER_ENABLED`) y todos los jobs son idempotentes. |
 | Retenciones vencidas   | La transacción de reserva pasa a `EXPIRED` las retenciones vencidas que choquen con el rango antes de insertar. El job programado es solo limpieza. |
-| Rate limiting por IP   | `slowapi` en memoria, con el backend de almacenamiento configurable para pasar a Redis después.            |
+| Rate limiting por IP   | `slowapi` en memoria, con el backend de almacenamiento configurable para pasar a Redis después. 10 solicitudes por minuto por IP en login, OTP y recuperación. |
+| Bloqueo de cuenta      | 5 intentos fallidos de login → bloqueo de 15 min. La respuesta es genérica: no revela si el correo existe ni si la cuenta está bloqueada. |
 | Límites por cuenta/OTP | En PostgreSQL (intentos fallidos de login, intentos por código, reenvíos), para que sobrevivan reinicios.  |
 | Refresh tokens         | Tabla de historial por sesión. Cualquier reuso de un token viejo revoca la sesión, con 30 s de gracia para el token inmediatamente anterior (refresh concurrentes). |
 | OTP                    | 10 min de vigencia, 5 intentos por código, 60 s entre reenvíos y máximo 5 reenvíos por hora por cuenta.   |
-| Correo                 | Interfaz `EmailSender` con `ConsoleEmailSender` y `BrevoEmailSender` (`httpx.AsyncClient`, sin SMTP ni SDK). Se elige con `EMAIL_BACKEND=console\|brevo`. Los tests nunca mandan correos reales. |
+| Correo                 | Interfaz `EmailSender` con `ConsoleEmailSender` y `SmtpEmailSender` (`aiosmtplib`, STARTTLS, puerto 587). Se elige con `EMAIL_BACKEND=console\|smtp`. Credenciales en `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` y `SMTP_FROM`. Los tests nunca mandan correos reales. |
 | Versionado de API      | Prefijo `/api/v1`.                                                                                         |
 | Idempotencia           | Header `Idempotency-Key` obligatorio al crear reserva y al crear el pago. Cancelar es idempotente por estado, sin clave. |
 | Base de datos local    | Base y usuario propios (`barberpixelmango`) dentro de la instancia `dulcecms`. Nunca se comparte la BD de otro proyecto. |

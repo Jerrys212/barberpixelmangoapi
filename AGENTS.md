@@ -21,7 +21,8 @@ de escribir código. Las reglas marcadas como **NUNCA** / **SIEMPRE** no son neg
 | Hash de password | `pwdlib[argon2]` — **NUNCA** `passlib` ni bcrypt manual   |
 | Rate limit (IP)  | `slowapi` (memoria en V1; backend intercambiable a Redis) |
 | Tareas periódicas| `APScheduler` en proceso (sin Redis en V1)                |
-| HTTP saliente    | `httpx.AsyncClient` (Brevo, proveedor de pagos)           |
+| Correo           | `aiosmtplib` (SMTP de Brevo, STARTTLS, puerto 587)        |
+| HTTP saliente    | `httpx.AsyncClient` (proveedor de pagos)                  |
 | Tests            | `pytest` + `httpx.AsyncClient` + `ASGITransport`, BD real |
 | Calidad          | `ruff` (lint + formato), `mypy --strict`                  |
 
@@ -68,7 +69,7 @@ src/
 ├── scheduler.py       # APScheduler: registro de jobs; arranca en lifespan si SCHEDULER_ENABLED
 ├── rate_limit.py      # Limiter de slowapi (storage_uri configurable)
 ├── idempotency/       # tabla y helper para el header Idempotency-Key
-├── email/             # EmailSender, ConsoleEmailSender, BrevoEmailSender, EmailSettings
+├── email/             # EmailSender, ConsoleEmailSender, SmtpEmailSender, EmailSettings
 ├── auth/
 │   ├── router.py      # registro, login, verificación, OTP, refresh, logout, recuperación, sesiones
 │   ├── schemas.py     # TokenPair, LoginRequest, RefreshRequest, SessionOut
@@ -134,9 +135,11 @@ Si algo no está definido en ninguno de los dos, pregunta; **NUNCA** lo asumas.
 
 ### Invariantes críticas
 
-- **SIEMPRE** guarda en cada cita un snapshot del servicio al reservar: nombre, precio, moneda,
-  duración y buffer. **NUNCA** recalcules una cita existente a partir de `services` o
-  `business_profile`; la FK al servicio es solo para navegación.
+- **SIEMPRE** guarda en cada cita un snapshot al reservar: nombre, precio y moneda del servicio,
+  duración, buffer y **ventana de cancelación**. **NUNCA** recalcules una cita existente a partir
+  de `services` o `business_profile`; la FK al servicio es solo para navegación. La anticipación
+  mínima/máxima, el intervalo de slots y la retención **no** van en el snapshot: se leen del
+  perfil vigente porque solo aplican al reservar (`DECISIONS.md`).
 - **SIEMPRE** guarda instantes como `TIMESTAMPTZ` (`DateTime(timezone=True)`) en UTC, y convierte
   horarios locales con la zona IANA del negocio (`zoneinfo.ZoneInfo(business.timezone)`).
   **NUNCA** uses offsets fijos (`UTC-6`, `timedelta(hours=-6)`) ni la hora local del servidor.
@@ -154,8 +157,9 @@ Si algo no está definido en ninguno de los dos, pregunta; **NUNCA** lo asumas.
   de la cita y del pago antes de cambiarlo. Un evento repetido **NUNCA** duplica pagos, citas ni
   reembolsos.
 - **SIEMPRE** valida en backend la ventana de cancelación del cliente: 24 h exactas antes del
-  instante de inicio (`start_at - now >= cancellation_window`), no "el día anterior". La ventana se
-  lee de `business_profile`. Ocultar el botón en la app no cuenta como validación.
+  instante de inicio (`start_at - now >= cancellation_window_snapshot`), no "el día anterior". La
+  ventana se lee del **snapshot de la cita**, nunca del perfil vigente. Ocultar el botón en la app
+  no cuenta como validación.
 - **SIEMPRE** crea una cita revalidando horario, excepciones y solapamientos dentro de la misma
   transacción, con lock del calendario y una restricción de exclusión en BD contra solapamientos
   de citas activas. **NUNCA** confíes en la disponibilidad que vio el cliente.
@@ -242,7 +246,8 @@ Referencia funcional: `docs/SPEC.md` sección 6.
   - `uv run python -m src.auth.cli reset-owner-password`: fija una contraseña nueva al `OWNER` y
     revoca todas sus sesiones.
   - Los comandos piden la contraseña de forma interactiva (`getpass`), **NUNCA** como argumento.
-- El registro exige nombre, correo, contraseña y **teléfono** (obligatorio).
+- El registro exige nombre, correo, contraseña y **teléfono** (obligatorio, formato E.164
+  validado con regex `^\+[1-9]\d{7,14}$`, sin dependencias extra).
 - Un usuario sin correo verificado **puede** iniciar sesión, pero no reservar ni pagar: 403 con
   código `EMAIL_NOT_VERIFIED`.
 - Dependencias en `auth/dependencies.py`:
@@ -315,15 +320,18 @@ Referencia funcional: `docs/SPEC.md` sección 6.
 
 ### Rate limiting
 
-- **Por IP:** `slowapi` en `src/rate_limit.py`, aplicado a login, registro, OTP, recuperación,
-  creación de reservas y pagos. Almacenamiento en memoria en V1 vía `RATE_LIMIT_STORAGE_URI`
-  (`memory://`); pasar a Redis es cambiar esa variable, sin tocar código. En memoria el límite es
-  por proceso: se acepta en V1.
+- **Por IP:** `slowapi` en `src/rate_limit.py`. **10 solicitudes por minuto por IP** en login,
+  OTP (verificar y reenviar) y recuperación (`RATE_LIMIT_AUTH`, valor `10/minute`).
+  Almacenamiento en memoria en V1 vía `RATE_LIMIT_STORAGE_URI` (`memory://`); pasar a Redis es
+  cambiar esa variable, sin tocar código. En memoria el límite es por proceso: se acepta en V1.
+  Excederlo responde 429.
 - **Por cuenta y por OTP:** en PostgreSQL, porque son los críticos y deben sobrevivir reinicios:
   intentos fallidos de login por cuenta (`users.failed_login_attempts`, `users.locked_until`),
   intentos por código (`attempts`) y reenvíos (contando códigos emitidos en la última hora).
-- Una cuenta bloqueada responde igual que credenciales inválidas (401 genérico), para no revelar
-  que existe.
+- **Bloqueo de cuenta:** **5 intentos fallidos → bloqueo de 15 min** (`LOGIN_MAX_FAILED_ATTEMPTS`,
+  `LOGIN_LOCKOUT_MINUTES`). Un login exitoso reinicia el contador.
+- Una cuenta bloqueada responde **exactamente igual** que credenciales inválidas (401 "Credenciales
+  inválidas", mismo cuerpo y headers): no revela si el correo existe ni si está bloqueada.
 
 ### Passwords y respuestas
 
@@ -365,14 +373,16 @@ Referencia funcional: `docs/SPEC.md` sección 6.
 - `src/email/` define un `Protocol` `EmailSender` con `async def send(message: EmailMessage) -> None`.
 - Dos implementaciones:
   - `ConsoleEmailSender`: no sale a la red; para tests y desarrollo sin red.
-  - `BrevoEmailSender`: API transaccional de Brevo (`POST https://api.brevo.com/v3/smtp/email`,
-    header `api-key`) con `httpx.AsyncClient` y timeout explícito. **NUNCA** SMTP ni el SDK de
-    Brevo.
-- Se elige con `EMAIL_BACKEND=console|brevo` (`EmailSettings` en `src/email/config.py`, con
-  `BREVO_API_KEY`, `EMAIL_SENDER_ADDRESS`, `EMAIL_SENDER_NAME`). Los services reciben el sender por
+  - `SmtpEmailSender`: SMTP de Brevo con `aiosmtplib` (async), **STARTTLS** en el puerto 587
+    (`start_tls=True`) y timeout explícito. **NUNCA** `smtplib` síncrono dentro de `async def`,
+    ni SMTP sin TLS.
+- Se elige con `EMAIL_BACKEND=console|smtp`. `EmailSettings` en `src/email/config.py` lee, con
+  estos nombres exactos: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` (`SecretStr`) y
+  `SMTP_FROM`. Con `EMAIL_BACKEND=smtp` todas son obligatorias. Los services reciben el sender por
   inyección de dependencias, nunca lo instancian.
-- **NUNCA** loguees la API key, el cuerpo del correo ni los códigos OTP. Un fallo de envío se
-  registra sin datos sensibles y **no** cambia la respuesta genérica al cliente.
+- **NUNCA** loguees `SMTP_USER`, `SMTP_PASS`, el cuerpo del correo ni los códigos OTP. Un fallo de
+  envío (`aiosmtplib.SMTPException`) se registra sin datos sensibles y **no** cambia la respuesta
+  genérica al cliente.
 - Los tests **SIEMPRE** usan `ConsoleEmailSender` o un fake vía `app.dependency_overrides`;
   **NUNCA** mandan correos reales.
 - Fase 1 solo envía verificación y recuperación. Confirmación, cancelación y reembolso se agregan

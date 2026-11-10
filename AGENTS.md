@@ -66,6 +66,7 @@ src/
 ├── database.py        # engine async, sessionmaker, dependencia get_session
 ├── models.py          # Base declarativa con naming_convention + mixins (timestamps)
 ├── exceptions.py      # AppError base + handler global
+├── registry.py        # load_models(): importa todos los modelos (Alembic, tests, CLI)
 ├── scheduler.py       # APScheduler: registro de jobs; arranca en lifespan si SCHEDULER_ENABLED
 ├── rate_limit.py      # Limiter de slowapi (storage_uri configurable)
 ├── idempotency/       # tabla y helper para el header Idempotency-Key
@@ -221,9 +222,20 @@ async def update(session: AsyncSession, user: User, data: UserUpdate) -> User:
 - **Todas las relaciones con `lazy="raise"`.** Carga explícita con `selectinload` / `joinedload`.
   (Evita N+1 y el error `MissingGreenlet` en async.)
 - `async_sessionmaker(..., expire_on_commit=False)`.
-- Sesión por request vía la dependencia `get_session`: hace `commit` al final si no hubo error y
-  `rollback` si lo hubo. **NUNCA** llames `session.commit()` en services ni repositories; usa
-  `session.flush()` si necesitas el id generado antes de terminar.
+- Sesión por request vía la dependencia `get_session`, que usa el context manager
+  `transaction_scope`: hace `commit` al final si no hubo error y `rollback` si lo hubo (salvo
+  `AppError` con `commit_on_error`, ver Errores). **NUNCA** llames `session.commit()` en services ni
+  repositories; usa `session.flush()` si necesitas el id generado antes de terminar.
+- `SessionDep` usa `Depends(get_session, scope="function")` para que el commit ocurra **antes** de
+  enviar la respuesta. Con el scope por defecto (`"request"`) FastAPI cierra la dependencia
+  después de responder: el cliente recibiría datos que todavía no existen en la BD. **NUNCA** le
+  quites el scope.
+- Código fuera de un request (CLI, jobs) abre su sesión con
+  `async with session_factory() as session, transaction_scope(session) as scoped:`. **NUNCA**
+  recorras `transaction_scope` con `async for`: la excepción no llega al generador y el rollback
+  queda colgado.
+- Todo modelo nuevo se registra en `src/registry.py` (`load_models`), que usan Alembic, los tests y
+  el CLI para conocer el metadata completo.
 - Migraciones:
   - Toda modificación de modelos lleva su migración de Alembic en el mismo cambio.
   - Revisa el archivo autogenerado antes de darlo por bueno (Alembic no detecta todo: renombres,
@@ -346,8 +358,13 @@ Referencia funcional: `docs/SPEC.md` sección 6.
 
 ## Errores
 
-- Errores de negocio heredan de `AppError(message, status_code)` en `src/exceptions.py`; un
-  handler global los convierte en JSON. Usa 404, 409, 403, 401 según corresponda.
+- Errores de negocio heredan de `AppError` en `src/exceptions.py` y declaran como atributos de
+  clase `status_code`, `code` y `message`. Un handler global los convierte en JSON. Usa 404, 409,
+  403, 401 según corresponda.
+- `commit_on_error = True` en un `AppError` hace que `transaction_scope` haga commit antes de
+  responder el error. Úsalo **solo** cuando el error debe dejar efectos persistentes (contador de
+  login fallido, intentos de OTP, revocación por reuso de refresh token); sin él, el rollback los
+  borraría.
 - Cada error de dominio lleva un **código estable** en mayúsculas que la app puede interpretar
   (`{"code": "SLOT_UNAVAILABLE", "detail": "..."}`): `SLOT_UNAVAILABLE`, `HOLD_EXPIRED`,
   `CANCELLATION_WINDOW_CLOSED`, `SESSION_REVOKED`, `EMAIL_NOT_VERIFIED`, etc. El mensaje puede
@@ -370,7 +387,7 @@ Referencia funcional: `docs/SPEC.md` sección 6.
 
 ## Correo
 
-- `src/email/` define un `Protocol` `EmailSender` con `async def send(message: EmailMessage) -> None`.
+- `src/email/` define un `Protocol` `EmailSender` con `async def send(email: OutgoingEmail) -> None`.
 - Dos implementaciones:
   - `ConsoleEmailSender`: no sale a la red; para tests y desarrollo sin red.
   - `SmtpEmailSender`: SMTP de Brevo con `aiosmtplib` (async), **STARTTLS** en el puerto 587
@@ -378,13 +395,16 @@ Referencia funcional: `docs/SPEC.md` sección 6.
     ni SMTP sin TLS.
 - Se elige con `EMAIL_BACKEND=console|smtp`. `EmailSettings` en `src/email/config.py` lee, con
   estos nombres exactos: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` (`SecretStr`) y
-  `SMTP_FROM`. Con `EMAIL_BACKEND=smtp` todas son obligatorias. Los services reciben el sender por
-  inyección de dependencias, nunca lo instancian.
+  `SMTP_FROM`. Con `EMAIL_BACKEND=smtp` todas son obligatorias. Los routers reciben el sender por
+  inyección de dependencias (`EmailSenderDep`), nunca lo instancian.
 - **NUNCA** loguees `SMTP_USER`, `SMTP_PASS`, el cuerpo del correo ni los códigos OTP. Un fallo de
   envío (`aiosmtplib.SMTPException`) se registra sin datos sensibles y **no** cambia la respuesta
   genérica al cliente.
 - Los tests **SIEMPRE** usan `ConsoleEmailSender` o un fake vía `app.dependency_overrides`;
   **NUNCA** mandan correos reales.
+- Los services **no** envían correos: devuelven el `OutgoingEmail` (o `None`) y el router lo
+  encola con `BackgroundTasks`. Así el correo sale después del commit y la respuesta no tarda más
+  cuando el correo existe (evita enumerar cuentas por tiempo de respuesta).
 - Fase 1 solo envía verificación y recuperación. Confirmación, cancelación y reembolso se agregan
   en sus fases.
 

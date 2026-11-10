@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && uv run --quiet python .claude/hooks/format_file.py",
+            "timeout": 60,
+            "statusMessage": "ruff"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && uv run --quiet python .claude/hooks/quality_gate.py",
+            "timeout": 300,
+            "statusMessage": "ruff + mypy + pytest"
+          }
+        ]
+      }
+    ]
+  }
+}

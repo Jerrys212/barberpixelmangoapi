@@ -4,9 +4,11 @@ from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from src.audit.models import AuditAction, AuditLog
 from src.auth import security
 from src.config import get_settings
 from src.database import get_session, transaction_scope
@@ -121,3 +123,23 @@ async def login(
 
 def bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+async def owner_headers(client: AsyncClient, session: AsyncSession) -> dict[str, str]:
+    await create_user(session, email="owner@example.com", role=UserRole.OWNER)
+    tokens = await login(client, email="owner@example.com")
+    return bearer(tokens["access_token"])
+
+
+async def customer_headers(client: AsyncClient, session: AsyncSession) -> dict[str, str]:
+    await create_user(session)
+    tokens = await login(client)
+    return bearer(tokens["access_token"])
+
+
+async def audit_entries(session: AsyncSession, action: AuditAction) -> list[AuditLog]:
+    session.expire_all()
+    result = await session.execute(
+        select(AuditLog).where(AuditLog.action == action).order_by(AuditLog.created_at)
+    )
+    return list(result.scalars().all())

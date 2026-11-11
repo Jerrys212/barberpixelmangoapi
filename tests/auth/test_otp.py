@@ -32,7 +32,7 @@ async def _register(client: AsyncClient) -> None:
             "email": EMAIL,
             "password": DEFAULT_PASSWORD,
             "full_name": "Cliente",
-            "phone": "+525512345678",
+            "phone": "5512345678",
         },
     )
     assert response.status_code == 201

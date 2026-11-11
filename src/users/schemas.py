@@ -1,11 +1,21 @@
+import re
 import uuid
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
 
 from src.users.models import UserRole
 
-Phone = Annotated[str, StringConstraints(pattern=r"^\+[1-9]\d{7,14}$")]
+PHONE_PATTERN = re.compile(r"[0-9]{10}")
+
+
+def _validate_phone(value: str) -> str:
+    if not PHONE_PATTERN.fullmatch(value):
+        raise ValueError("El teléfono debe tener exactamente 10 dígitos, solo números")
+    return value
+
+
+Phone = Annotated[str, AfterValidator(_validate_phone)]
 FullName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 
 

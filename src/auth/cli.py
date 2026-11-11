@@ -38,7 +38,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     create = commands.add_parser("create-owner", help="Crea la cuenta OWNER")
     create.add_argument("--email", required=True)
     create.add_argument("--name", required=True)
-    create.add_argument("--phone", required=True, help="Formato E.164, p. ej. +525512345678")
+    create.add_argument("--phone", required=True, help="10 dígitos, p. ej. 5512345678")
 
     commands.add_parser("reset-owner-password", help="Cambia la contraseña del OWNER")
     return parser.parse_args(argv)

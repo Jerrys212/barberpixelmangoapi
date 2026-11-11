@@ -28,7 +28,7 @@ La cuenta `OWNER` solo se crea y recupera desde consola (la contraseña se pide 
 interactiva):
 
 ```bash
-uv run python -m src.auth.cli create-owner --email dueno@example.com --name "Nombre" --phone +525512345678
+uv run python -m src.auth.cli create-owner --email dueno@example.com --name "Nombre" --phone 5512345678
 uv run python -m src.auth.cli reset-owner-password
 ```
 

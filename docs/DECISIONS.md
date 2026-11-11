@@ -20,7 +20,7 @@ contradicen, manda este archivo. Toda decisión nueva se agrega aquí con su fec
 | Moneda e importes          | Solo MXN en V1, pero se guarda la columna de moneda. Importes en centavos como entero. |
 | Imagen del servicio        | URL externa. Sin subida de archivos.                                                   |
 | Correo no verificado       | Puede iniciar sesión, pero no reservar ni pagar (403 con error de dominio identificable). |
-| Teléfono                   | Obligatorio al registrarse, en formato E.164 (`+525512345678`), validado con regex.    |
+| Teléfono                   | Obligatorio al registrarse: exactamente 10 dígitos de México, solo números (`5512345678`). Sin `+52`, espacios ni guiones. Reemplaza a E.164 (10 de noviembre de 2026): en México el formato habitual es de 10 dígitos. |
 
 ### Configuración del negocio
 

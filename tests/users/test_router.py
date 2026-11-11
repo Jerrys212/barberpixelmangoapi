@@ -13,13 +13,13 @@ class TestUpdateMe:
 
         response = await client.patch(
             ME_URL,
-            json={"full_name": "Nombre Nuevo", "phone": "+525500001111"},
+            json={"full_name": "Nombre Nuevo", "phone": "5500001111"},
             headers=bearer(tokens["access_token"]),
         )
 
         assert response.status_code == 200
         assert response.json()["full_name"] == "Nombre Nuevo"
-        assert response.json()["phone"] == "+525500001111"
+        assert response.json()["phone"] == "5500001111"
 
     async def test_rejects_invalid_phone(self, client: AsyncClient, session: AsyncSession) -> None:
         await create_user(session)

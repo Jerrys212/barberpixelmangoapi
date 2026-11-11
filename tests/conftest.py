@@ -95,7 +95,7 @@ async def create_user(
         email=email,
         hashed_password=security.hash_password(password),
         full_name="Cliente Prueba",
-        phone="+525512345678",
+        phone="5512345678",
         role=role,
     )
     if verified:

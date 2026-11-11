@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +15,7 @@ REGISTER_PAYLOAD = {
     "email": "Nuevo@Example.com",
     "password": DEFAULT_PASSWORD,
     "full_name": "Nuevo Cliente",
-    "phone": "+525511112222",
+    "phone": "5511112222",
 }
 
 
@@ -59,10 +60,17 @@ class TestRegister:
         assert response.status_code == 409
         assert response.json()["code"] == "EMAIL_ALREADY_REGISTERED"
 
-    async def test_rejects_phone_not_in_e164(self, client: AsyncClient) -> None:
-        response = await client.post(REGISTER_URL, json={**REGISTER_PAYLOAD, "phone": "5511112222"})
+    @pytest.mark.parametrize(
+        "phone",
+        ["551111222", "55111122223", "+525511112222", "55-1111-2222", "55 1111 2222", "55111a2222"],
+    )
+    async def test_rejects_phone_that_is_not_exactly_ten_digits(
+        self, client: AsyncClient, phone: str
+    ) -> None:
+        response = await client.post(REGISTER_URL, json={**REGISTER_PAYLOAD, "phone": phone})
 
         assert response.status_code == 422
+        assert "10 dígitos" in response.json()["detail"][0]["msg"]
 
     async def test_rejects_short_password(self, client: AsyncClient) -> None:
         response = await client.post(REGISTER_URL, json={**REGISTER_PAYLOAD, "password": "corta"})

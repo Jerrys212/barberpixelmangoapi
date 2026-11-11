@@ -11,7 +11,7 @@ def _answers(*values: str) -> Iterator[str]:
 
 
 class TestCreateOwnerCommand:
-    def test_rejects_phone_not_in_e164(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_rejects_phone_that_is_not_ten_digits(self, monkeypatch: pytest.MonkeyPatch) -> None:
         answers = _answers("clave-del-dueno", "clave-del-dueno")
         monkeypatch.setattr("src.auth.cli.getpass.getpass", lambda _: next(answers))
 
@@ -26,7 +26,7 @@ class TestCreateOwnerCommand:
 
         with pytest.raises(SystemExit, match="no coinciden"):
             cli.main(
-                ["create-owner", "--email", "d@example.com", "--name", "D", "--phone", "+5255"]
+                ["create-owner", "--email", "d@example.com", "--name", "D", "--phone", "5512345678"]
             )
 
     def test_passes_validated_data_to_creation(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -47,12 +47,12 @@ class TestCreateOwnerCommand:
                 "--name",
                 "Dueño",
                 "--phone",
-                "+525599998888",
+                "5599998888",
             ]
         )
 
         assert received[0].email == "Dueno@example.com"
-        assert received[0].phone == "+525599998888"
+        assert received[0].phone == "5599998888"
 
     def test_password_is_never_a_cli_argument(self) -> None:
         with pytest.raises(SystemExit):

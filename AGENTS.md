@@ -258,8 +258,8 @@ Referencia funcional: `docs/SPEC.md` sección 6.
   - `uv run python -m src.auth.cli reset-owner-password`: fija una contraseña nueva al `OWNER` y
     revoca todas sus sesiones.
   - Los comandos piden la contraseña de forma interactiva (`getpass`), **NUNCA** como argumento.
-- El registro exige nombre, correo, contraseña y **teléfono** (obligatorio, formato E.164
-  validado con regex `^\+[1-9]\d{7,14}$`, sin dependencias extra).
+- El registro exige nombre, correo, contraseña y **teléfono** (obligatorio, exactamente 10 dígitos,
+  solo números, sin `+`, espacios ni guiones; regex `[0-9]{10}` con `fullmatch`).
 - Un usuario sin correo verificado **puede** iniciar sesión, pero no reservar ni pagar: 403 con
   código `EMAIL_NOT_VERIFIED`.
 - Dependencias en `auth/dependencies.py`:

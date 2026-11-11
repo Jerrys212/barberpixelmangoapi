@@ -26,6 +26,18 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+async def get_optional_user(
+    session: SessionDep,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> User | None:
+    if credentials is None:
+        return None
+    return await auth_service.get_authenticated_user(session, credentials.credentials)
+
+
+OptionalUser = Annotated[User | None, Depends(get_optional_user)]
+
+
 async def get_current_session_id(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
     _: CurrentUser,

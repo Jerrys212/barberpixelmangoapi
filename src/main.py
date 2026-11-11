@@ -5,12 +5,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.auth.router import router as auth_router
+from src.availability.router import router as availability_router
+from src.business.router import router as business_router
+from src.catalog.router import router as catalog_router
 from src.config import Environment, get_settings
 from src.database import engine
 from src.email.config import EmailBackend, get_email_settings
 from src.exceptions import register_exception_handlers
 from src.health.router import router as health_router
 from src.rate_limit import limiter
+from src.schedule.router import router as schedule_router
 from src.users.router import router as users_router
 
 API_PREFIX = "/api/v1"
@@ -45,8 +49,15 @@ def create_app() -> FastAPI:
     )
     register_exception_handlers(app)
     app.include_router(health_router)
-    app.include_router(auth_router, prefix=API_PREFIX)
-    app.include_router(users_router, prefix=API_PREFIX)
+    for router in (
+        auth_router,
+        users_router,
+        business_router,
+        catalog_router,
+        schedule_router,
+        availability_router,
+    ):
+        app.include_router(router, prefix=API_PREFIX)
     return app
 
 

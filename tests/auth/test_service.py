@@ -14,7 +14,7 @@ OWNER_DATA = OwnerCreate(
     email="Dueno@Example.com",
     password="clave-del-dueno",
     full_name="Dueño",
-    phone="+525599998888",
+    phone="5599998888",
 )
 
 

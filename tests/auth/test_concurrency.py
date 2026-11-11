@@ -47,7 +47,7 @@ async def _create_committed_user(
             email=EMAIL,
             hashed_password=security.hash_password(DEFAULT_PASSWORD),
             full_name="Concurrente",
-            phone="+525512345678",
+            phone="5512345678",
             role=UserRole.CUSTOMER,
         )
         if verified:
@@ -126,7 +126,7 @@ class TestCommitOrdering:
                     "email": EMAIL,
                     "password": DEFAULT_PASSWORD,
                     "full_name": "Concurrente",
-                    "phone": "+525512345678",
+                    "phone": "5512345678",
                 },
             )
 

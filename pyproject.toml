@@ -17,6 +17,7 @@ dependencies = [
     "pyjwt>=2.15.1",
     "slowapi>=0.1.10",
     "sqlalchemy[asyncio]>=2.1.8",
+    "tzdata>=2026.6",
 ]
 
 [dependency-groups]

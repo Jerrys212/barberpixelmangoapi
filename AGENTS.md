@@ -127,7 +127,15 @@ Si algo no está definido en ninguno de los dos, pregunta; **NUNCA** lo asumas.
   (p. ej. `POST /services` en `catalog`, `DELETE /sessions/{id}` en `auth`) y se protegen con la
   dependencia de rol `OWNER` (`OwnerUser`).
 - `availability` y `appointments` comparten la misma regla de ocupación (cita activa =
-  `start_at` hasta `end_at + buffer_snapshot`). Esa regla vive en un solo lugar y ambos la usan.
+  `start_at` hasta `end_at + buffer_snapshot`). Esa regla vive en un solo lugar
+  (`availability.engine.occupied_range`) y ambos la usan.
+- `availability/engine.py` es una función pura (sin BD ni reloj: `now` entra como argumento).
+  Toda regla de cálculo de inicios se agrega y se prueba ahí; `availability/service.py` solo
+  carga datos y llama al motor.
+- Toda escritura que cambie cuándo está abierto el negocio (horario semanal, excepciones) y, desde
+  la fase 3, la creación de citas, toma primero el lock del calendario
+  (`business_service.lock_calendar`, `SELECT ... FOR UPDATE` sobre la fila única de
+  `business_profile`).
 - `email`, `idempotency`, `scheduler` y `rate_limit` son infraestructura transversal, no
   dominios: no tienen reglas de negocio ni router propio.
 - `business_profile` guarda los parámetros editables por el dueño (zona, moneda, intervalo de
@@ -242,6 +250,12 @@ async def update(session: AsyncSession, user: User, data: UserUpdate) -> User:
     cambios de tipo, enums).
   - Cada migración tiene `downgrade()` funcional.
   - **NUNCA** edites una migración que ya se aplicó en otro entorno; crea una nueva.
+  - Alembic no detecta cambios en enums con `native_enum=False`: al agregar un valor, la
+    migración reemplaza el CHECK a mano (con `op.f(nombre)` para que no se duplique el prefijo).
+  - Para probar `downgrade()` usa la revisión destino explícita
+    (`uv run alembic downgrade <revision_anterior>`), **NUNCA** `-1` encadenado después de un
+    `upgrade` que pudo fallar: si el `upgrade` no corrió, `-1` baja la migración anterior y borra
+    datos. Encadena con `set -o pipefail` si filtras la salida con `| tail`.
 - **NUNCA** construyas SQL con f-strings o concatenación. Usa el ORM o `text()` con parámetros.
 
 ## Autenticación (access + refresh)
@@ -258,8 +272,8 @@ Referencia funcional: `docs/SPEC.md` sección 6.
   - `uv run python -m src.auth.cli reset-owner-password`: fija una contraseña nueva al `OWNER` y
     revoca todas sus sesiones.
   - Los comandos piden la contraseña de forma interactiva (`getpass`), **NUNCA** como argumento.
-- El registro exige nombre, correo, contraseña y **teléfono** (obligatorio, formato E.164
-  validado con regex `^\+[1-9]\d{7,14}$`, sin dependencias extra).
+- El registro exige nombre, correo, contraseña y **teléfono** (obligatorio, exactamente 10 dígitos,
+  solo números, sin `+`, espacios ni guiones; regex `[0-9]{10}` con `fullmatch`).
 - Un usuario sin correo verificado **puede** iniciar sesión, pero no reservar ni pagar: 403 con
   código `EMAIL_NOT_VERIFIED`.
 - Dependencias en `auth/dependencies.py`:

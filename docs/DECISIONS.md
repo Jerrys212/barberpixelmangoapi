@@ -20,7 +20,7 @@ contradicen, manda este archivo. Toda decisión nueva se agrega aquí con su fec
 | Moneda e importes          | Solo MXN en V1, pero se guarda la columna de moneda. Importes en centavos como entero. |
 | Imagen del servicio        | URL externa. Sin subida de archivos.                                                   |
 | Correo no verificado       | Puede iniciar sesión, pero no reservar ni pagar (403 con error de dominio identificable). |
-| Teléfono                   | Obligatorio al registrarse, en formato E.164 (`+525512345678`), validado con regex.    |
+| Teléfono                   | Obligatorio al registrarse: exactamente 10 dígitos de México, solo números (`5512345678`). Sin `+52`, espacios ni guiones. Reemplaza a E.164 (10 de noviembre de 2026): en México el formato habitual es de 10 dígitos. |
 
 ### Configuración del negocio
 
@@ -64,10 +64,27 @@ Qué se congela en la cita y qué se lee del perfil vigente:
 | Idempotencia           | Header `Idempotency-Key` obligatorio al crear reserva y al crear el pago. Cancelar es idempotente por estado, sin clave. |
 | Base de datos local    | Base y usuario propios (`barberpixelmango`) dentro de la instancia `dulcecms`. Nunca se comparte la BD de otro proyecto. |
 
+## Catálogo, agenda y disponibilidad (10 de noviembre de 2026)
+
+| Tema                          | Decisión                                                                                       |
+| ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| Perfil público del negocio    | `GET /business` es público: nombre, teléfono y dirección (opcionales), zona horaria y la configuración que usa la app. |
+| Cambios al perfil             | Solo el dueño. Se auditan (`BUSINESS_UPDATED`) con valor anterior y nuevo de cada campo cambiado. La moneda no se edita por la API en V1. |
+| Servicios inactivos           | `GET /services` lista solo activos. `?include_inactive=true` es solo para `OWNER`; cualquier otro (cliente o anónimo) recibe 403. Los servicios no se borran, se desactivan. |
+| Horario semanal               | Varios intervalos por día, sin encimarse. `PUT /schedule/weekly` reemplaza la semana completa y se audita. |
+| Tipos de excepción            | `CLOSED` (día completo), `SPECIAL_HOURS` (reemplaza el horario semanal de esa fecha) y `BLOCK` (resta un rango; el dueño no está). Todas en hora local de pared. |
+| Reglas de excepciones         | No se permiten fechas pasadas (según la fecha local del negocio; hoy sí). Una fecha no puede tener `CLOSED` y `SPECIAL_HOURS` a la vez, ni dos `SPECIAL_HOURS` encimados. |
+| Cierre de varios días         | Se guarda una fila `CLOSED` por día, pero el endpoint acepta `date_from`/`date_to` y crea todas en una sola transacción (todo o nada), auditado como una sola acción. Máximo 366 días. |
+| Rejilla de inicios            | Cada `slot_interval_minutes`, contando desde el inicio de cada intervalo abierto. Intervalos contiguos se tratan como uno. |
+| Servicio y buffer             | El servicio debe caber completo dentro del horario abierto. El buffer puede pasarse de la hora de cierre, pero **no** puede pisar un bloqueo ni otra cita. |
+| Horizonte                     | Se mide por instante: `inicio ≤ ahora + booking_horizon_days`. La anticipación mínima igual: `inicio ≥ ahora + min_notice_minutes`. |
+| Cambio de horario (DST)       | Una hora local que no existe se descarta. La conversión siempre usa `zoneinfo` con la zona del perfil (paquete `tzdata`, necesario en Windows). |
+
 ## Pendientes
 
 | Tema                              | Estado                                                                                       |
 | --------------------------------- | -------------------------------------------------------------------------------------------- |
+| Cambios de agenda con citas afectadas | Fase 3. Responder 409 con la lista de citas afectadas en lugar de guardar cuando un bloqueo, un cierre, un horario especial o un cambio del horario semanal deje citas activas fuera del horario. En fase 2 se guardan sin esa revisión porque aún no existen citas. |
 | Pago recibido tras expirar        | Se decide en fase 4. Propuesta inicial: reembolso automático, incidente en `audit_logs` y aviso al dueño. |
 | Proveedor de pagos                | Se decide en fase 4.                                                                         |
 
